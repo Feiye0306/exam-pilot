@@ -442,7 +442,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
           {/* 按鈕 1: 隱藏的資料夾上傳 input (Fallback) */}
           <input
             type="file"
@@ -465,37 +465,54 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             className="hidden"
           />
 
-          {/* 📂 直接讀取本機資料夾按鈕 (優先調用現代 File System Access API) */}
-          <button
-            onClick={handleOpenNativeDirectory}
-            disabled={isBatchProcessing}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/40 text-xs font-bold shadow-md shadow-cyan-900/30 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-            title="直接點選電腦或隨身碟裡的考卷資料夾，系統立刻全部讀入列出"
-          >
-            <FolderUp className="w-4 h-4 text-cyan-200" />
-            <span>{isBatchProcessing ? '正在讀取考卷中...' : '📁 讀取本機考卷資料夾'}</span>
-          </button>
-
-          {/* 📂 多選圖片按鈕 (絕對不彈資料夾上傳提示) */}
+          {/* 🌟 第一推薦主按鈕: 🖼️ 多選圖片讀入 (100% 絕不觸發任何瀏覽器上傳警告) */}
           <button
             onClick={() => multiFileInputRef.current?.click()}
             disabled={isBatchProcessing}
-            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98] disabled:opacity-50"
-            title="按住 Ctrl 多選多張試卷圖檔直接讀入"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white border border-cyan-400/40 text-xs font-bold shadow-lg shadow-cyan-900/30 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+            title="按住 Ctrl 多選多張試卷圖檔直接讀入 (絕對不會彈出 Chrome 上傳警告！)"
           >
-            <Files className="w-4 h-4 text-cyan-400" />
-            <span>🖼️ 多選圖片讀入</span>
+            <Files className="w-4 h-4 text-cyan-200" />
+            <span>🖼️ 多選圖片讀入 (無警告・推薦)</span>
           </button>
 
-          {/* ＋ 單張建立考卷按鈕 */}
+          {/* 次要按鈕: 📁 讀取資料夾 (針對特定少於50個檔案的小資料夾) */}
+          <button
+            onClick={handleOpenNativeDirectory}
+            disabled={isBatchProcessing}
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-50"
+            title="適合只有放考卷的小資料夾；請勿選取 Downloads 等包含數千雜檔的母資料夾"
+          >
+            <FolderUp className="w-4 h-4 text-slate-400" />
+            <span>{isBatchProcessing ? '正在讀取中...' : '📁 讀取小資料夾'}</span>
+          </button>
+
+          {/* ＋ 單張手動建立考卷按鈕 */}
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98]"
+            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 text-xs font-semibold transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             <span>＋ 單張新增</span>
           </button>
         </div>
+      </div>
+
+      {/* 🎯 最推薦：常駐考卷圖檔拖放區 (0警告、即拖即載入) */}
+      <div 
+        onClick={() => multiFileInputRef.current?.click()}
+        className="border-2 border-dashed border-cyan-500/40 hover:border-cyan-400 bg-cyan-950/10 hover:bg-cyan-950/20 rounded-2xl p-4 text-center cursor-pointer transition-all group"
+      >
+        <div className="flex items-center justify-center gap-2 text-cyan-300 font-bold text-xs group-hover:text-cyan-200">
+          <FolderUp className="w-4 h-4 text-cyan-400 animate-pulse" />
+          <span>最絲滑方法：直接把這次要考的考卷圖片「拖曳拉進來」或「點擊此處多選」</span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            ✓ 100% 免除 Chrome 提示
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1">
+          支援 JPG、PNG、WEBP 圖片。選取或拖入今天加強課需要的試卷即可，避免選到包含 3,977 個雜檔的母資料夾導致瀏覽器記憶體崩潰。
+        </p>
       </div>
 
       {/* 🏷️ 虛擬標籤雲 (點擊標籤即時篩選考卷) */}
