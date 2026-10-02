@@ -58,7 +58,7 @@ export interface Student {
   updatedAt: number;
 }
 
-export type ActiveTab = 'tutor' | 'planner' | 'library' | 'overview';
+export type ActiveTab = 'tutor' | 'roadmap' | 'planner' | 'library' | 'overview';
 
 export type UserRole = 'tutor' | 'admin';
 

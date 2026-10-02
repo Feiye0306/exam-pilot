@@ -18,7 +18,8 @@ import {
   Edit3,
   Check,
   LayoutGrid,
-  List
+  List,
+  Users
 } from 'lucide-react';
 import { savePaper, compressImage } from '../services/storageService';
 
@@ -26,12 +27,14 @@ interface LibraryViewProps {
   papers: ExamPaper[];
   onDataChanged: () => void;
   onPreviewPaper: (paper: ExamPaper) => void;
+  onOpenBatchAssign?: (paper: ExamPaper) => void;
 }
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
   papers,
   onDataChanged,
   onPreviewPaper,
+  onOpenBatchAssign,
 }) => {
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,20 +63,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [thumbnailUrlInput, setThumbnailUrlInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
-  // 📂 批次匯入 Modal 狀態 (指定資料夾 / 批量拖拉檔案)
-  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
-  const [batchPendingPapers, setBatchPendingPapers] = useState<{
-    id: string;
-    file: File;
-    title: string;
-    subject: string;
-    unit: string;
-    difficulty: DifficultyLevel;
-    tags: string[];
-    thumbnailUrl: string;
-  }[]>([]);
+  // 📂 批次讀取狀態 (指定資料夾 / 批量拖拉檔案)
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
-  const [batchSuccessCount, setBatchSuccessCount] = useState<number | null>(null);
 
   // 預設後台標籤庫 (方便直接點擊貼上，免反覆手打)
   const DEFAULT_TAG_POOL = [
@@ -221,69 +212,51 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     };
   };
 
-  // 處理批次選擇檔案或指定資料夾
+  // 處理批次選擇檔案或直接讀取整個資料夾 (即讀即用，免多餘確認流程)
   const handleBatchFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
     setIsBatchProcessing(true);
-    const pendingList: any[] = [];
-
     // 依序處理選中的檔案 (支援圖片格式)
     const validFiles = Array.from(files).filter(f => /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name));
 
-    for (let i = 0; i < validFiles.length; i++) {
-      const file = validFiles[i];
-      try {
-        const thumb = await compressImage(file, 600, 0.7);
-        const parsed = parseFilename(file.name);
-        pendingList.push({
-          id: `batch-${Date.now()}-${i}`,
-          file,
-          title: parsed.title,
-          subject: parsed.subject,
-          unit: parsed.unit,
-          difficulty: parsed.difficulty,
-          tags: parsed.tags,
-          thumbnailUrl: thumb
-        });
-      } catch (e) {
-        console.warn('縮圖生成失敗，跳過:', file.name);
-      }
+    if (validFiles.length === 0) {
+      alert('所選資料夾中未發現圖片格式考卷 (支援 JPG, PNG, WEBP)！');
+      setIsBatchProcessing(false);
+      return;
     }
 
-    setBatchPendingPapers(pendingList);
-    setIsBatchProcessing(false);
-    setIsBatchModalOpen(true);
-  };
-
-  // 確認全部批次匯入考卷庫
-  const handleConfirmBatchImport = async () => {
-    setIsBatchProcessing(true);
     try {
-      for (const item of batchPendingPapers) {
-        const newPaper: ExamPaper = {
-          id: `paper-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          title: item.title,
-          subject: item.subject,
-          unit: item.unit,
-          difficulty: item.difficulty,
-          targetMinutes: 25,
-          keyPoints: [],
-          tags: item.tags,
-          thumbnailUrl: item.thumbnailUrl,
-          createdAt: Date.now()
-        };
-        await savePaper(newPaper);
+      let loadedCount = 0;
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i];
+        try {
+          const thumb = await compressImage(file, 800, 0.75);
+          const parsed = parseFilename(file.name);
+          const newPaper: ExamPaper = {
+            id: `paper-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+            title: parsed.title,
+            subject: parsed.subject,
+            unit: parsed.unit,
+            difficulty: parsed.difficulty,
+            targetMinutes: 25,
+            keyPoints: [],
+            tags: parsed.tags,
+            thumbnailUrl: thumb,
+            createdAt: Date.now() + i
+          };
+          await savePaper(newPaper);
+          loadedCount++;
+        } catch (e) {
+          console.warn('圖片讀取跳過:', file.name);
+        }
       }
-      setBatchSuccessCount(batchPendingPapers.length);
-      setTimeout(() => {
-        setIsBatchModalOpen(false);
-        setBatchPendingPapers([]);
-        setBatchSuccessCount(null);
-        onDataChanged();
-      }, 1000);
+
+      onDataChanged();
+      alert(`🎉 已成功直接讀取資料夾中的 ${loadedCount} 份考卷，已全數載入完成，立即可派發使用！`);
     } catch (err) {
-      alert('批次儲存失敗，請再試一次');
+      console.error('讀取資料夾失敗:', err);
+      alert('讀取失敗，請再試一次');
     } finally {
       setIsBatchProcessing(false);
     }
@@ -391,29 +364,33 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             className="hidden"
           />
 
-          {/* 📂 指定資料夾或多檔案批次匯入按鈕 */}
+          {/* 📂 直接讀取本機資料夾按鈕 (點擊直選，即讀即用) */}
           <button
-            onClick={() => {
-              if (confirm('是否要「選取整個資料夾」進行考卷批次匯入？\n（若按取消，則可「多選一整批圖片」匯入）')) {
-                folderInputRef.current?.click();
-              } else {
-                multiFileInputRef.current?.click();
-              }
-            }}
-            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98]"
-            title="支援一次選取整包資料夾或批次拖拉多張試卷圖檔"
+            onClick={() => folderInputRef.current?.click()}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/40 text-xs font-bold shadow-md shadow-cyan-900/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            title="直接點選電腦或隨身碟裡的考卷資料夾，系統立刻全部讀入列出"
           >
-            <FolderUp className="w-4 h-4 text-cyan-400" />
-            <span>📁 指定資料夾／批次匯入</span>
+            <FolderUp className="w-4 h-4 text-cyan-200" />
+            <span>📁 讀取本機考卷資料夾</span>
+          </button>
+
+          {/* 📂 多選圖片按鈕 */}
+          <button
+            onClick={() => multiFileInputRef.current?.click()}
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98]"
+            title="多選圖片檔案直接讀取"
+          >
+            <Files className="w-4 h-4 text-cyan-400" />
+            <span>多選圖片直接讀入</span>
           </button>
 
           {/* ＋ 單張上傳考卷按鈕 */}
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-900/30 transition-all active:scale-[0.98]"
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
-            <span>＋ 單張上傳</span>
+            <span>＋ 單張新增</span>
           </button>
         </div>
       </div>
@@ -664,15 +641,28 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 </div>
               </div>
 
-              {/* 底部查看按鈕 */}
-              <div className="p-4 pt-2 border-t border-slate-700/60 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500">ID: {paper.id.substring(0, 14)}</span>
+              {/* 底部查看與批次派發按鈕 */}
+              <div className="p-3.5 pt-2 border-t border-slate-700/60 flex items-center justify-between gap-2">
+                {onOpenBatchAssign ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenBatchAssign(paper)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    title="一鍵將此考卷指派加入多位學生的進度軌道"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>👥 派給多位學生</span>
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-slate-500">ID: {paper.id.substring(0, 10)}</span>
+                )}
+
                 <button
                   type="button"
                   onClick={() => onPreviewPaper(paper)}
                   className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 font-bold transition-colors"
                 >
-                  <span>查看試卷大圖</span>
+                  <span>查看大圖</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -761,6 +751,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
               {/* 右側操作按鈕 */}
               <div className="flex items-center justify-end gap-2 shrink-0 border-t md:border-t-0 pt-2 md:pt-0 border-slate-700/60">
+                {onOpenBatchAssign && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenBatchAssign(paper)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>👥 派給多位學生</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => onPreviewPaper(paper)}
@@ -784,100 +785,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         </div>
       )}
 
-      {/* 📁 批次匯入確認 Modal (指定資料夾 / 多選圖片) */}
-      {isBatchModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
-            
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                  <FolderUp className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">
-                    批次匯入考卷清單 ({batchPendingPapers.length} 份)
-                  </h3>
-                  <p className="text-xs text-slate-400">已自動解析檔案名稱，您可檢視或直接一鍵儲存至試卷庫</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsBatchModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
-              >
-                ✕
-              </button>
-            </div>
 
-            {/* 待匯入清單列表 */}
-            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-              {batchPendingPapers.map((item, idx) => (
-                <div
-                  key={item.id}
-                  className="p-3 rounded-xl bg-slate-800/80 border border-slate-700 flex items-center justify-between gap-3 text-xs"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={item.thumbnailUrl}
-                      alt={item.title}
-                      className="w-14 h-10 object-cover rounded-lg border border-slate-700 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <div className="font-bold text-white truncate">{item.title}</div>
-                      <div className="flex items-center gap-2 mt-1 text-slate-400 text-[11px]">
-                        <span className="text-cyan-300 font-semibold">{item.subject}</span>
-                        <span>•</span>
-                        {getDifficultyBadge(item.difficulty)}
-                        {item.tags.length > 0 && (
-                          <span className="text-slate-400">#{item.tags.join(' #')}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setBatchPendingPapers(prev => prev.filter((_, i) => i !== idx))}
-                    className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 shrink-0"
-                    title="從本次匯入中排除"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* 成功反饋與按鈕 */}
-            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-              <span className="text-xs text-slate-400">
-                {batchSuccessCount !== null ? (
-                  <span className="text-emerald-400 font-bold">✓ 成功匯入 {batchSuccessCount} 份考卷！</span>
-                ) : (
-                  <span>共選取 {batchPendingPapers.length} 份考卷圖檔</span>
-                )}
-              </span>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsBatchModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  disabled={isBatchProcessing || batchPendingPapers.length === 0}
-                  onClick={handleConfirmBatchImport}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-900/30 disabled:opacity-50"
-                >
-                  {isBatchProcessing ? '正在匯入儲存中...' : `一鍵匯入全數考卷 (${batchPendingPapers.length})`}
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
 
       {/* 🏷️ 標籤貼紙庫 Modal (點擊直接貼上／撕下，免反覆打字) */}
       {tagPickerPaper && (

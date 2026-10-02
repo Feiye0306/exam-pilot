@@ -220,6 +220,85 @@ export const completeTrackItem = async ({
   return updatedStudent;
 };
 
+// 批次派卷：將同一張考卷一次發放加入多位學生的科目軌道
+export const batchAssignPaperToStudents = async (params: {
+  paper: ExamPaper;
+  studentIds: string[];
+  subject: string;
+  tutorNotes?: string;
+}): Promise<Student[]> => {
+  const { paper, studentIds, subject, tutorNotes } = params;
+  const allStudents = getLocalStudents();
+  const now = Date.now();
+
+  const updatedStudents = allStudents.map((student) => {
+    if (!studentIds.includes(student.id)) return student;
+
+    const currentTrack = student.tracks[subject] || {
+      subject,
+      updatedAt: now,
+      items: []
+    };
+
+    const newItem: TrackItem = {
+      itemId: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      paperId: paper.id,
+      paperTitle: paper.title,
+      subject,
+      difficulty: paper.difficulty,
+      targetMinutes: paper.targetMinutes,
+      status: 'pending',
+      score: null,
+      maxScore: 100,
+      assignedAt: now,
+      completedAt: null,
+      tutorName: null,
+      tutorNotes: tutorNotes || null,
+      submissionPhotoUrls: [],
+    };
+
+    return {
+      ...student,
+      updatedAt: now,
+      tracks: {
+        ...student.tracks,
+        [subject]: {
+          ...currentTrack,
+          updatedAt: now,
+          items: [...currentTrack.items, newItem]
+        }
+      }
+    };
+  });
+
+  saveLocalStudents(updatedStudents);
+
+  if (isFirebaseConfigured && db) {
+    for (const stu of updatedStudents) {
+      if (studentIds.includes(stu.id)) {
+        setDoc(doc(db, 'students', stu.id), stu).catch(console.error);
+      }
+    }
+  }
+
+  return updatedStudents;
+};
+
+// 批次快速儲存多張考卷至題庫 (直接從本機資料夾讀取後一鍵存入)
+export const batchSavePapers = async (newPapers: ExamPaper[]): Promise<ExamPaper[]> => {
+  const current = getLocalPapers();
+  const combined = [...newPapers, ...current.filter(p => !newPapers.some(np => np.id === p.id))];
+  saveLocalPapers(combined);
+
+  if (isFirebaseConfigured && db) {
+    for (const p of newPapers) {
+      setDoc(doc(db, 'papers', p.id), p).catch(console.error);
+    }
+  }
+
+  return combined;
+};
+
 // 照片壓縮處理，回傳可直接呈現或儲存的 DataURL (避免手機上傳超大原始圖耗盡流量)
 export const compressImage = (file: File, maxWidth = 1200, quality = 0.75): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -232,7 +311,6 @@ export const compressImage = (file: File, maxWidth = 1200, quality = 0.75): Prom
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-
         if (width > maxWidth) {
           height = Math.round((height * maxWidth) / width);
           width = maxWidth;
@@ -254,3 +332,4 @@ export const compressImage = (file: File, maxWidth = 1200, quality = 0.75): Prom
     reader.onerror = (err) => reject(err);
   });
 };
+

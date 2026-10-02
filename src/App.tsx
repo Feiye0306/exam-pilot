@@ -10,6 +10,8 @@ import { SubmissionDetailModal } from './components/SubmissionDetailModal';
 import { ClassroomTimerModal } from './components/ClassroomTimerModal';
 import { TimerFloatingBar } from './components/TimerFloatingBar';
 import { TimerAlertModal } from './components/TimerAlertModal';
+import { RoadmapBoardView } from './components/RoadmapBoardView';
+import { BatchAssignModal } from './components/BatchAssignModal';
 import { useExamTimers } from './hooks/useExamTimers';
 import { 
   subscribeToPapers, 
@@ -21,6 +23,24 @@ import {
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('tutor');
   
+  // 主題切換 (預設清爽明亮模式 'light'，支援深色 'dark')
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('exam_pilot_theme') as 'light' | 'dark') || 'light';
+  });
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('exam_pilot_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  };
+
   // 角色權限狀態 (預設為 'tutor' 輔導老師模式，完全隱藏主教排程台)
   const [userRole, setUserRole] = useState<UserRole>(() => {
     return (localStorage.getItem('exam_pilot_user_role') as UserRole) || 'tutor';
@@ -29,6 +49,15 @@ export const App: React.FC = () => {
   const [papers, setPapers] = useState<ExamPaper[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 👥 多人批次派卷 Modal 狀態
+  const [isBatchAssignOpen, setIsBatchAssignOpen] = useState(false);
+  const [batchAssignPaper, setBatchAssignPaper] = useState<ExamPaper | null>(null);
+
+  const handleOpenBatchAssign = (paper?: ExamPaper) => {
+    setBatchAssignPaper(paper || papers[0] || null);
+    setIsBatchAssignOpen(true);
+  };
 
   // ⏱️ 全域考試計時器系統 (支援全班與個別學生)
   const {
@@ -132,9 +161,9 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col font-sans transition-colors duration-200`}>
       
-      {/* 頂部導覽列 (支援角色切換與主教排程台隱藏) */}
+      {/* 頂部導覽列 (支援路線看板、主題切換與批次派卷快捷鍵) */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -142,6 +171,9 @@ export const App: React.FC = () => {
         setUserRole={setUserRole}
         studentCount={students.length}
         paperCount={papers.length}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onOpenBatchAssign={() => handleOpenBatchAssign()}
       />
 
       {/* 主工作區 (依 Tab 切換視角) */}
@@ -152,7 +184,7 @@ export const App: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* 1. 輔導老師前台 (年級名單分頁過濾、查卷、發卷、拍照登分、名單抽屜與個別計時) */}
+            {/* 1. 現場輔導前台 (查卷、發卷、拍照登分、名單抽屜與個別計時) */}
             {activeTab === 'tutor' && (
               <TutorView
                 students={students}
@@ -170,7 +202,35 @@ export const App: React.FC = () => {
               />
             )}
 
-            {/* 2. 主教老師排程台 (僅管理員解鎖後可見) */}
+            {/* 2. 🗺️ 全班考卷進度路線圖看板 (一眼看清全班各自路線圖，不用一個個點) */}
+            {activeTab === 'roadmap' && (
+              <RoadmapBoardView
+                students={students}
+                papers={papers}
+                onPreviewPaper={(p) => setPreviewingPaper(p)}
+                onOpenBatchAssign={(p) => handleOpenBatchAssign(p)}
+                onViewSubmission={(stu, sub, it) => setViewingSubmission({ student: stu, subject: sub, item: it })}
+                onCompleteItem={(stu, sub, it) => {
+                  setActiveTab('tutor');
+                }}
+                activeTimers={timers}
+                onStartStudentTimer={startStudentTimer}
+                onPauseTimer={pauseTimer}
+                onResumeTimer={resumeTimer}
+              />
+            )}
+
+            {/* 3. 考卷資料庫 (支援直接讀取資料夾、批次派卷、圖卡/列表切換) */}
+            {activeTab === 'library' && (
+              <LibraryView
+                papers={papers}
+                onDataChanged={handleDataChanged}
+                onPreviewPaper={(p) => setPreviewingPaper(p)}
+                onOpenBatchAssign={(p) => handleOpenBatchAssign(p)}
+              />
+            )}
+
+            {/* 4. 排程中控台 (僅管理員解鎖後可見) */}
             {activeTab === 'planner' && userRole === 'admin' && (
               <PlannerView
                 students={students}
@@ -180,16 +240,7 @@ export const App: React.FC = () => {
               />
             )}
 
-            {/* 3. 考卷資料庫 (虛擬標籤篩選、資料夾/批次匯入、縮圖、圖卡/列表切換) */}
-            {activeTab === 'library' && (
-              <LibraryView
-                papers={papers}
-                onDataChanged={handleDataChanged}
-                onPreviewPaper={(p) => setPreviewingPaper(p)}
-              />
-            )}
-
-            {/* 4. 全班戰情室 (各科完成度、考卷卡關與平均成績) */}
+            {/* 5. 全班戰情室 (各科完成度、考卷卡關與平均成績) */}
             {activeTab === 'overview' && (
               <OverviewView
                 students={students}
@@ -200,6 +251,16 @@ export const App: React.FC = () => {
           </>
         )}
       </main>
+
+      {/* 👥 多人批次派同一份考卷 Modal */}
+      <BatchAssignModal
+        isOpen={isBatchAssignOpen}
+        onClose={() => setIsBatchAssignOpen(false)}
+        papers={papers}
+        initialPaper={batchAssignPaper}
+        students={students}
+        onDataChanged={handleDataChanged}
+      />
 
       {/* 考卷大圖與考點預覽 Modal */}
       <PaperPreviewModal
