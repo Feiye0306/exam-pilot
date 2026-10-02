@@ -65,6 +65,7 @@ export const App: React.FC = () => {
     expiredAlert,
     setExpiredAlert,
     startClassroomTimer,
+    startGroupTimer,
     startStudentTimer,
     pauseTimer,
     resumeTimer,
@@ -280,6 +281,7 @@ export const App: React.FC = () => {
         onClose={() => setIsTimerModalOpen(false)}
         timers={timers}
         onStartClassroomTimer={startClassroomTimer}
+        onStartGroupTimer={startGroupTimer}
         onStartStudentTimer={startStudentTimer}
         onPauseTimer={pauseTimer}
         onResumeTimer={resumeTimer}

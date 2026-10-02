@@ -91,7 +91,7 @@ export const useExamTimers = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // 1. 啟動或重設全班統一計時器
+  // 1. 啟動或重設全場統一計時器
   const startClassroomTimer = useCallback((minutes: number, customTitle?: string) => {
     requestNotificationPermission();
     const totalSec = minutes * 60;
@@ -99,7 +99,7 @@ export const useExamTimers = () => {
     const newTimer: ExamTimerItem = {
       id: 'classroom-global',
       type: 'classroom',
-      studentName: customTitle || '全班統一考試',
+      studentName: customTitle || '全場統一考試',
       paperTitle: '全場同步計時',
       totalSeconds: totalSec,
       remainingSeconds: totalSec,
@@ -112,6 +112,36 @@ export const useExamTimers = () => {
 
     setTimers((prev) => {
       const filtered = prev.filter((t) => t.id !== 'classroom-global');
+      return [newTimer, ...filtered];
+    });
+  }, []);
+
+  // 1-1. 啟動特定年級群組計時器 (例如高一全體、國一全體)
+  const startGroupTimer = useCallback((grade: string, minutes: number, customTitle?: string) => {
+    requestNotificationPermission();
+    const totalSec = minutes * 60;
+    const now = Date.now();
+    const isGlobal = !grade || grade === 'all';
+    const timerId = isGlobal ? 'classroom-global' : `group-${grade}`;
+    const displayTitle = customTitle || (isGlobal ? '全場統一考試' : `【${grade}】全體統一測驗`);
+
+    const newTimer: ExamTimerItem = {
+      id: timerId,
+      type: 'classroom',
+      grade: isGlobal ? undefined : grade,
+      studentName: displayTitle,
+      paperTitle: `${minutes} 分鐘集中測驗`,
+      totalSeconds: totalSec,
+      remainingSeconds: totalSec,
+      isRunning: true,
+      startedAt: now,
+      endAt: now + totalSec * 1000,
+      isExpired: false,
+      notified: false,
+    };
+
+    setTimers((prev) => {
+      const filtered = prev.filter((t) => t.id !== timerId);
       return [newTimer, ...filtered];
     });
   }, []);
@@ -223,6 +253,7 @@ export const useExamTimers = () => {
     expiredAlert,
     setExpiredAlert,
     startClassroomTimer,
+    startGroupTimer,
     startStudentTimer,
     pauseTimer,
     resumeTimer,

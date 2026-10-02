@@ -1,17 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ExamTimerItem, Student } from '../types';
 import { 
   Clock, 
   Play, 
   Pause, 
-  RotateCcw, 
   Plus, 
   X, 
   Users, 
   User, 
   Trash2, 
   BellRing,
-  Volume2
+  Volume2,
+  Timer as TimerIcon,
+  Flame,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { playTimerBeep } from '../utils/audioAlert';
 
@@ -20,6 +23,7 @@ interface ClassroomTimerModalProps {
   onClose: () => void;
   timers: ExamTimerItem[];
   onStartClassroomTimer: (minutes: number, title?: string) => void;
+  onStartGroupTimer?: (grade: string, minutes: number, title?: string) => void;
   onStartStudentTimer: (
     studentId: string, 
     studentName: string, 
@@ -41,6 +45,7 @@ export const ClassroomTimerModal: React.FC<ClassroomTimerModalProps> = ({
   onClose,
   timers,
   onStartClassroomTimer,
+  onStartGroupTimer,
   onStartStudentTimer,
   onPauseTimer,
   onResumeTimer,
@@ -49,233 +54,387 @@ export const ClassroomTimerModal: React.FC<ClassroomTimerModalProps> = ({
   onSelectStudent,
   students,
 }) => {
-  const [selectedMinutes, setSelectedMinutes] = useState<number>(30);
-  const [customTitle, setCustomTitle] = useState('全班段考加強');
-  const [activeTab, setActiveTab] = useState<'classroom' | 'individual'>('classroom');
+  // 自動從現有學生中統計所有年級清單
+  const gradeList = useMemo(() => {
+    const map: Record<string, number> = {};
+    students.forEach((s) => {
+      const g = s.grade || '未分年級';
+      map[g] = (map[g] || 0) + 1;
+    });
+    return Object.entries(map).map(([grade, count]) => ({ grade, count }));
+  }, [students]);
 
-  // 個別計時表單
-  const [selectedStudentForTimer, setSelectedStudentForTimer] = useState<string>('');
+  // 新增計時設定區塊狀態
+  const [targetType, setTargetType] = useState<'grade' | 'student'>('grade');
+  const [selectedGrade, setSelectedGrade] = useState<string>(gradeList[0]?.grade || '高一');
+  const [gradeMinutes, setGradeMinutes] = useState<number>(30);
+  const [gradeCustomTitle, setGradeCustomTitle] = useState('');
+
+  // 個別學生計時設定
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [studentMinutes, setStudentMinutes] = useState<number>(30);
   const [studentPaperTitle, setStudentPaperTitle] = useState('');
 
   if (!isOpen) return null;
 
-  const classroomTimer = timers.find((t) => t.type === 'classroom');
-  const studentTimers = timers.filter((t) => t.type === 'student');
-
+  // 格式化秒數 mm:ss
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  const handleStartIndividual = (e: React.FormEvent) => {
+  // 分離計時器類別
+  const runningTimers = timers.filter((t) => t.isRunning && !t.isExpired);
+  const expiredTimers = timers.filter((t) => t.isExpired);
+  const pausedTimers = timers.filter((t) => !t.isRunning && !t.isExpired && t.remainingSeconds > 0);
+
+  // 啟動年級統一計時
+  const handleStartGradeTimer = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentForTimer) {
-      alert('請先選擇學生！');
+    const title = gradeCustomTitle.trim() || `${selectedGrade} 全體統一測驗`;
+    if (onStartGroupTimer) {
+      onStartGroupTimer(selectedGrade, gradeMinutes, title);
+    } else {
+      onStartClassroomTimer(gradeMinutes, title);
+    }
+    setGradeCustomTitle('');
+  };
+
+  // 啟動個別學生計時
+  const handleStartIndividualTimer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudentId) {
+      alert('請先選擇一位學生！');
       return;
     }
-    const student = students.find((s) => s.id === selectedStudentForTimer);
+    const student = students.find((s) => s.id === selectedStudentId);
     if (!student) return;
 
     onStartStudentTimer(
       student.id,
       student.name,
       student.grade,
-      studentPaperTitle.trim() || '自訂測驗卷',
+      studentPaperTitle.trim() || '課堂加強測驗',
       '加強測驗',
       studentMinutes
     );
-    setSelectedStudentForTimer('');
+    setSelectedStudentId('');
     setStudentPaperTitle('');
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl space-y-5 max-h-[92vh] flex flex-col">
         
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        {/* 頂部 Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/10">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/10">
               <Clock className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>補習班考試計時器中控</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                  即時聲響通知
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-bold text-white">
+                  補習班考試計時器中控
+                </h2>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">
+                  {timers.length > 0 ? `🔥 ${timers.length} 個計時進行中` : '目前無計時'}
                 </span>
-              </h2>
+              </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                支援全班統一倒數與個別臨時來生分開計時，時間到自動發出和弦音效提醒收卷
+                一覽全場各年級與個別學生的即時倒數，時間到自動播放提示音收卷
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => playTimerBeep()}
               className="p-2 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
-              title="測試提示音效"
+              title="測試提示鈴響"
             >
               <Volume2 className="w-4 h-4" />
             </button>
             <button
               onClick={onClose}
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title="關閉"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* 模式切換 Tabs */}
-        <div className="flex bg-slate-800/80 p-1 rounded-xl border border-slate-700">
-          <button
-            onClick={() => setActiveTab('classroom')}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'classroom'
-                ? 'bg-amber-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>全班統一計時</span>
-            {classroomTimer && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/40 text-amber-200">
-                {classroomTimer.isRunning ? '進行中' : '暫停中'}
-              </span>
-            )}
-          </button>
+        {/* 捲動內容區塊 */}
+        <div className="flex-1 overflow-y-auto space-y-6 pr-1">
 
-          <button
-            onClick={() => setActiveTab('individual')}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'individual'
-                ? 'bg-amber-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>個別學生計時 ({studentTimers.length})</span>
-          </button>
-        </div>
-
-        {/* Tab 1: 全班統一計時 */}
-        {activeTab === 'classroom' && (
-          <div className="space-y-4 overflow-y-auto pr-1">
-            {/* 目前全班計時器狀態 (若正在跑) */}
-            {classroomTimer ? (
-              <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-900 border border-amber-500/50 shadow-xl space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-amber-400">目前全班大時鐘</span>
-                    <h3 className="text-base font-bold text-white mt-0.5">{classroomTimer.studentName}</h3>
-                  </div>
-
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                    classroomTimer.isExpired
-                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
-                      : classroomTimer.isRunning
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                      : 'bg-slate-700 text-slate-300'
-                  }`}>
-                    {classroomTimer.isExpired ? '時間已屆滿！' : classroomTimer.isRunning ? '倒數計時中' : '已暫停'}
-                  </span>
-                </div>
-
-                {/* 倒數大數字 */}
-                <div className="text-center py-2">
-                  <div className={`font-mono text-5xl sm:text-6xl font-black tracking-tight ${
-                    classroomTimer.isExpired 
-                      ? 'text-rose-500 animate-bounce' 
-                      : classroomTimer.remainingSeconds < 300 
-                      ? 'text-amber-400 animate-pulse' 
-                      : 'text-white'
-                  }`}>
-                    {formatTime(classroomTimer.remainingSeconds)}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    總設定時間：{Math.round(classroomTimer.totalSeconds / 60)} 分鐘
-                  </p>
-                </div>
-
-                {/* 控制按鈕列 */}
-                <div className="flex items-center justify-center gap-2 pt-2">
-                  {classroomTimer.isRunning ? (
-                    <button
-                      onClick={() => onPauseTimer(classroomTimer.id)}
-                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all"
-                    >
-                      <Pause className="w-4 h-4" />
-                      <span>暫停</span>
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => onResumeTimer(classroomTimer.id)}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-900/30 transition-all"
-                    >
-                      <Play className="w-4 h-4" />
-                      <span>繼續</span>
-                    </button>
+          {/* ============================================================== */}
+          {/* 區塊 1: 🔥【打開即看】目前正在計時中的即時看板 (Live Timers) */}
+          {/* ============================================================== */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-amber-400" />
+                <span>現場倒數即時監控 ({timers.length})</span>
+              </h3>
+              {timers.length > 0 && (
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-emerald-400 font-medium">● 進行中: {runningTimers.length}</span>
+                  {expiredTimers.length > 0 && (
+                    <span className="text-rose-400 font-bold animate-pulse">● 需收卷: {expiredTimers.length}</span>
                   )}
-
-                  <button
-                    onClick={() => onAddMinutes(classroomTimer.id, 5)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1 transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-amber-400" />
-                    <span>+5 分鐘</span>
-                  </button>
-
-                  <button
-                    onClick={() => onAddMinutes(classroomTimer.id, 10)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1 transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-amber-400" />
-                    <span>+10 分鐘</span>
-                  </button>
-
-                  <button
-                    onClick={() => onRemoveTimer(classroomTimer.id)}
-                    className="px-3.5 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 text-xs font-bold flex items-center gap-1 transition-all"
-                    title="結束並清除全班計時器"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>結束計時</span>
-                  </button>
+                  {pausedTimers.length > 0 && (
+                    <span className="text-slate-400">● 暫停: {pausedTimers.length}</span>
+                  )}
                 </div>
+              )}
+            </div>
+
+            {/* 無任何計時中的乾淨提示 */}
+            {timers.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-slate-800/40 border border-dashed border-slate-700 text-center space-y-2">
+                <Clock className="w-8 h-8 text-slate-500 mx-auto" />
+                <p className="text-sm font-semibold text-slate-300">目前沒有任何正在計時的項目</p>
+                <p className="text-xs text-slate-500">
+                  請點擊下方「按年級統一計時」或「個別學生計時」立即發起測驗！
+                </p>
               </div>
             ) : (
-              /* 尚未開始全班計時，顯示設定區 */
-              <div className="p-5 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-4">
+              /* 計時卡片列表 (大字體即時倒數，一目了然) */
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {timers.map((t) => {
+                  const isClassroom = t.type === 'classroom';
+                  const percent = Math.max(0, Math.min(100, Math.round((t.remainingSeconds / t.totalSeconds) * 100)));
+
+                  return (
+                    <div
+                      key={t.id}
+                      className={`p-4 rounded-2xl border transition-all shadow-md relative overflow-hidden flex flex-col justify-between ${
+                        t.isExpired
+                          ? 'bg-rose-950/30 border-rose-500/60 ring-1 ring-rose-500/50'
+                          : t.remainingSeconds < 300
+                          ? 'bg-amber-950/30 border-amber-500/60 ring-1 ring-amber-500/40'
+                          : 'bg-slate-800/80 border-slate-700/80'
+                      }`}
+                    >
+                      {/* 頂部進度細條 */}
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-slate-700">
+                        <div
+                          className={`h-full transition-all duration-1000 ${
+                            t.isExpired
+                              ? 'bg-rose-500'
+                              : t.remainingSeconds < 300
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+
+                      {/* 卡片標題與對象 */}
+                      <div className="flex items-start justify-between gap-2 pt-1">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {isClassroom ? (
+                              <span className="text-[11px] px-2 py-0.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold flex items-center gap-1">
+                                <Users className="w-3 h-3" />
+                                {t.grade ? `${t.grade} 全體` : '全班統一'}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold flex items-center gap-1">
+                                <User className="w-3 h-3" />
+                                {t.grade || '個人'}
+                              </span>
+                            )}
+                            <span className="font-bold text-sm text-white">{t.studentName}</span>
+                          </div>
+                          {t.paperTitle && (
+                            <p className="text-xs text-slate-400 mt-1 truncate max-w-[200px]">
+                              {t.paperTitle}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* 狀態標籤 */}
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
+                          t.isExpired
+                            ? 'bg-rose-500 text-white animate-pulse'
+                            : t.isRunning
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-slate-700 text-slate-300'
+                        }`}>
+                          {t.isExpired ? '時間到！請收卷' : t.isRunning ? '進行中' : '已暫停'}
+                        </span>
+                      </div>
+
+                      {/* 巨大字體倒數數字 */}
+                      <div className="my-3 text-center">
+                        <div
+                          className={`font-mono text-4xl sm:text-5xl font-black tracking-tight ${
+                            t.isExpired
+                              ? 'text-rose-400 animate-bounce'
+                              : t.remainingSeconds < 300
+                              ? 'text-amber-400 animate-pulse'
+                              : 'text-white'
+                          }`}
+                        >
+                          {formatTime(t.remainingSeconds)}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1">
+                          總時間：{Math.round(t.totalSeconds / 60)} 分鐘
+                        </div>
+                      </div>
+
+                      {/* 快捷操作控制列 */}
+                      <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-slate-700/50">
+                        <div className="flex items-center gap-1">
+                          {t.isRunning ? (
+                            <button
+                              onClick={() => onPauseTimer(t.id)}
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-amber-300 text-xs font-bold flex items-center gap-1 transition-colors"
+                            >
+                              <Pause className="w-3.5 h-3.5" />
+                              <span>暫停</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onResumeTimer(t.id)}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 transition-colors"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              <span>繼續</span>
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => onAddMinutes(t.id, 5)}
+                            className="px-2 py-1.5 rounded-xl bg-slate-700/80 hover:bg-slate-600 text-slate-200 text-xs font-semibold"
+                            title="加 5 分鐘"
+                          >
+                            +5分
+                          </button>
+                          <button
+                            onClick={() => onAddMinutes(t.id, 10)}
+                            className="px-2 py-1.5 rounded-xl bg-slate-700/80 hover:bg-slate-600 text-slate-200 text-xs font-semibold"
+                            title="加 10 分鐘"
+                          >
+                            +10分
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => onRemoveTimer(t.id)}
+                          className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 text-xs font-semibold flex items-center gap-1 transition-colors"
+                          title="結束計時並清除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>收卷</span>
+                        </button>
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+
+          {/* ============================================================== */}
+          {/* 區塊 2: 🚀【按年級/學生快速發起】(解決全班統一計時不知是哪班問題) */}
+          {/* ============================================================== */}
+          <div className="pt-2 border-t border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-cyan-400" />
+                <span>快速發起新計時</span>
+              </h3>
+
+              {/* 切換按年級 vs 個別學生 */}
+              <div className="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setTargetType('grade')}
+                  className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                    targetType === 'grade'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>按年級統一計時</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetType('student')}
+                  className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                    targetType === 'student'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>個別學生臨時計時</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 發起模式 1: 按年級統一計時 */}
+            {targetType === 'grade' && (
+              <form onSubmit={handleStartGradeTimer} className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    測驗主題名稱 (選填)
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
+                    1. 選擇要統一計時的年級／班別：
                   </label>
-                  <input
-                    type="text"
-                    value={customTitle}
-                    onChange={(e) => setCustomTitle(e.target.value)}
-                    placeholder="例如：第一次段考考前總複習"
-                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
-                  />
+                  <div className="flex flex-wrap gap-2">
+                    {gradeList.map(({ grade, count }) => (
+                      <button
+                        key={grade}
+                        type="button"
+                        onClick={() => setSelectedGrade(grade)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                          selectedGrade === grade
+                            ? 'bg-amber-600 text-white border-amber-400 shadow-md'
+                            : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        <span>{grade}</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30">
+                          {count}人
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGrade('all')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                        selectedGrade === 'all'
+                          ? 'bg-amber-600 text-white border-amber-400 shadow-md'
+                          : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      <span>全場所有學生</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30">
+                        {students.length}人
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-2">
-                    選擇測驗時間 (分鐘)
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
+                    2. 測驗時間 (分鐘)：
                   </label>
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                    {[15, 20, 30, 40, 50, 60].map((m) => (
+                    {[15, 20, 25, 30, 45, 60].map((m) => (
                       <button
                         key={m}
                         type="button"
-                        onClick={() => setSelectedMinutes(m)}
+                        onClick={() => setGradeMinutes(m)}
                         className={`py-2 rounded-xl text-xs font-bold transition-all border ${
-                          selectedMinutes === m
-                            ? 'bg-amber-600 text-white border-amber-400 shadow-md'
+                          gradeMinutes === m
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-md'
                             : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
                         }`}
                       >
@@ -285,167 +444,89 @@ export const ClassroomTimerModal: React.FC<ClassroomTimerModalProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => onStartClassroomTimer(selectedMinutes, customTitle)}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-slate-950 font-black text-sm shadow-xl shadow-amber-900/30 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
-                >
-                  <Play className="w-4 h-4 fill-slate-950" />
-                  <span>🚀 啟動全班統一計時 ({selectedMinutes} 分鐘)</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tab 2: 個別學生臨時計時 */}
-        {activeTab === 'individual' && (
-          <div className="space-y-4 overflow-y-auto pr-1 flex-1">
-            {/* 新增個別學生計時 */}
-            <form onSubmit={handleStartIndividual} className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-3">
-              <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" />
-                <span>為臨時抵達或特定學生啟動專屬計時：</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">選擇學生</label>
-                  <select
-                    value={selectedStudentForTimer}
-                    onChange={(e) => setSelectedStudentForTimer(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none"
-                  >
-                    <option value="">-- 請選擇學生 --</option>
-                    {students.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.grade})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">考卷名稱 (選填)</label>
+                <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
                   <input
                     type="text"
-                    placeholder="如：高一救底單元卷"
-                    value={studentPaperTitle}
-                    onChange={(e) => setStudentPaperTitle(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none"
+                    placeholder={`主題名稱 (選填，預設：${selectedGrade === 'all' ? '全場統一考試' : `${selectedGrade} 全體統一測驗`})`}
+                    value={gradeCustomTitle}
+                    onChange={(e) => setGradeCustomTitle(e.target.value)}
+                    className="flex-1 w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                   />
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-900/30 flex items-center justify-center gap-1.5 transition-all shrink-0 active:scale-[0.98]"
+                  >
+                    <Play className="w-4 h-4 fill-slate-950" />
+                    <span>🚀 啟動【{selectedGrade === 'all' ? '全場' : selectedGrade}】統一計時 ({gradeMinutes}分)</span>
+                  </button>
                 </div>
+              </form>
+            )}
 
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">作答時間 (分鐘)</label>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="number"
-                      min={5}
-                      max={120}
-                      value={studentMinutes}
-                      onChange={(e) => setStudentMinutes(Number(e.target.value))}
-                      className="w-20 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white text-center focus:outline-none"
-                    />
-                    <button
-                      type="submit"
-                      className="flex-1 py-1.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-all"
+            {/* 發起模式 2: 個別學生臨時計時 */}
+            {targetType === 'student' && (
+              <form onSubmit={handleStartIndividualTimer} className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      選擇學生：
+                    </label>
+                    <select
+                      value={selectedStudentId}
+                      onChange={(e) => setSelectedStudentId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
                     >
-                      開始計時
-                    </button>
+                      <option value="">-- 請選擇學生 --</option>
+                      {students.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.grade || '未分級'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      測驗考卷／科目 (選填)：
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="如：段考衝刺數學卷"
+                      value={studentPaperTitle}
+                      onChange={(e) => setStudentPaperTitle(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
+                    >
+                    </input>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      測驗時間：
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        min={5}
+                        max={120}
+                        value={studentMinutes}
+                        onChange={(e) => setStudentMinutes(Number(e.target.value))}
+                        className="w-20 px-2 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white text-center font-bold focus:outline-none focus:border-amber-500"
+                      />
+                      <button
+                        type="submit"
+                        className="flex-1 py-2 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-all shadow-md"
+                      >
+                        開始個人計時
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </form>
-
-            {/* 正在計時中的個別學生列表 */}
-            <div className="space-y-2">
-              <div className="text-xs font-bold text-slate-400">
-                目前正在個別計時的學生 ({studentTimers.length})：
-              </div>
-
-              {studentTimers.length === 0 ? (
-                <div className="text-center py-8 text-slate-500 text-xs">
-                  目前沒有個別學生正在計時。輔導老師也可在前台當前考卷卡片上一鍵啟動計時！
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {studentTimers.map((t) => (
-                    <div
-                      key={t.id}
-                      className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-between gap-3 shadow-md"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-white">{t.studentName}</span>
-                          {t.grade && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300">
-                              {t.grade}
-                            </span>
-                          )}
-                          <span className="text-xs text-slate-400 truncate max-w-[140px] sm:max-w-xs">
-                            {t.paperTitle}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 shrink-0">
-                        {/* 倒數秒數 */}
-                        <div className={`font-mono font-bold text-lg sm:text-xl ${
-                          t.isExpired
-                            ? 'text-rose-400 animate-bounce'
-                            : t.remainingSeconds < 300
-                            ? 'text-amber-400 animate-pulse'
-                            : 'text-emerald-400'
-                        }`}>
-                          {formatTime(t.remainingSeconds)}
-                        </div>
-
-                        {/* 控制鍵 */}
-                        <div className="flex items-center gap-1">
-                          {t.isRunning ? (
-                            <button
-                              onClick={() => onPauseTimer(t.id)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-700"
-                              title="暫停"
-                            >
-                              <Pause className="w-3.5 h-3.5" />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => onResumeTimer(t.id)}
-                              className="p-1.5 rounded-lg text-emerald-400 hover:bg-slate-700"
-                              title="繼續"
-                            >
-                              <Play className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => onAddMinutes(t.id, 5)}
-                            className="text-[11px] px-2 py-1 rounded bg-slate-700 text-slate-200 hover:bg-slate-600 font-semibold"
-                            title="加5分鐘"
-                          >
-                            +5分
-                          </button>
-
-                          <button
-                            onClick={() => onRemoveTimer(t.id)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-700"
-                            title="清除計時"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+              </form>
+            )}
 
           </div>
-        )}
+
+        </div>
 
       </div>
     </div>

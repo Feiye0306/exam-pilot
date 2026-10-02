@@ -19,7 +19,8 @@ import {
   Check,
   LayoutGrid,
   List,
-  Users
+  Users,
+  ShieldCheck
 } from 'lucide-react';
 import { savePaper, compressImage } from '../services/storageService';
 
@@ -65,6 +66,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   // 📂 批次讀取狀態 (指定資料夾 / 批量拖拉檔案)
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   // 預設後台標籤庫 (方便直接點擊貼上，免反覆手打)
   const DEFAULT_TAG_POOL = [
@@ -212,13 +214,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     };
   };
 
-  // 處理批次選擇檔案或直接讀取整個資料夾 (即讀即用，免多餘確認流程)
-  const handleBatchFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    setIsBatchProcessing(true);
-    // 依序處理選中的檔案 (支援圖片格式)
-    const validFiles = Array.from(files).filter(f => /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name));
+  // 核心處理檔案清單 (支援防呆保護與檔名解析，即讀即用)
+  const processFileList = async (fileArray: File[]) => {
+    // 依序過濾支援的圖片格式
+    const validFiles = fileArray.filter(f => /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name));
 
     if (validFiles.length === 0) {
       alert('所選資料夾中未發現圖片格式考卷 (支援 JPG, PNG, WEBP)！');
@@ -226,10 +225,24 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       return;
     }
 
+    // 防呆保護：若超過 30 個檔案 (例如誤選 Downloads 包含上千個檔案)，先確認載入數量避免卡死
+    let filesToProcess = validFiles;
+    if (validFiles.length > 30) {
+      const confirmLoad = window.confirm(
+        `💡 溫馨提示：偵測到您選取的資料夾包含 ${validFiles.length} 張圖片（若選到 Downloads 下載夾可能包含其他雜檔）。\n\n為維護瀏覽器流暢度，系統將為您優先載入前 30 份試卷。\n點擊「確定」繼續載入前 30 份試卷，點擊「取消」放棄。`
+      );
+      if (!confirmLoad) {
+        setIsBatchProcessing(false);
+        return;
+      }
+      filesToProcess = validFiles.slice(0, 30);
+    }
+
+    setIsBatchProcessing(true);
     try {
       let loadedCount = 0;
-      for (let i = 0; i < validFiles.length; i++) {
-        const file = validFiles[i];
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
         try {
           const thumb = await compressImage(file, 800, 0.75);
           const parsed = parseFilename(file.name);
@@ -253,13 +266,59 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       }
 
       onDataChanged();
-      alert(`🎉 已成功直接讀取資料夾中的 ${loadedCount} 份考卷，已全數載入完成，立即可派發使用！`);
+      alert(`🎉 已成功在本地讀取 ${loadedCount} 份考卷！已全數載入試卷庫，立即可指派使用！`);
     } catch (err) {
-      console.error('讀取資料夾失敗:', err);
+      console.error('讀取失敗:', err);
       alert('讀取失敗，請再試一次');
     } finally {
       setIsBatchProcessing(false);
     }
+  };
+
+  // 📁 優先使用現代 File System Access API (免除 Chromium 嚇人的上傳警告彈窗)
+  const handleOpenNativeDirectory = async () => {
+    if ('showDirectoryPicker' in window) {
+      try {
+        // @ts-ignore
+        const dirHandle = await window.showDirectoryPicker();
+        setIsBatchProcessing(true);
+        const collectedFiles: File[] = [];
+
+        // 遍歷選取的資料夾內部檔案 (只撈取圖片)
+        // @ts-ignore
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'file' && /\.(jpe?g|png|webp|gif|bmp)$/i.test(entry.name)) {
+            const file = await entry.getFile();
+            collectedFiles.push(file);
+            if (collectedFiles.length >= 60) break; // 避免狂掃幾千個檔案
+          }
+        }
+
+        if (collectedFiles.length === 0) {
+          alert('該資料夾內未發現試卷圖檔 (支援 JPG, PNG, WEBP)！');
+          setIsBatchProcessing(false);
+          return;
+        }
+
+        await processFileList(collectedFiles);
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          // 使用者主動取消
+          return;
+        }
+        console.warn('showDirectoryPicker 受限，切換至標準選取:', err);
+      }
+    }
+
+    // 若瀏覽器不支援 showDirectoryPicker，則調用 folderInputRef
+    folderInputRef.current?.click();
+  };
+
+  // 處理批次選擇檔案或直接讀取整個資料夾
+  const handleBatchFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    await processFileList(Array.from(files));
   };
 
   // 單張封面縮圖處理
@@ -327,9 +386,51 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div 
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 relative"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          processFileList(Array.from(e.dataTransfer.files));
+        }
+      }}
+    >
+      {/* 拖曳全螢幕覆蓋提示 */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 bg-cyan-950/80 backdrop-blur-sm border-4 border-dashed border-cyan-400 flex flex-col items-center justify-center p-6 text-center animate-fade-in pointer-events-none">
+          <FolderUp className="w-16 h-16 text-cyan-400 mb-4 animate-bounce" />
+          <h3 className="text-2xl font-black text-white">放開滑鼠直接載入考卷圖檔</h3>
+          <p className="text-sm text-cyan-200 mt-2">
+            100% 本地記憶體秒讀，絕不上傳伺服器，免除瀏覽器任何制式提示！
+          </p>
+        </div>
+      )}
+
+      {/* 🔒 本地離線隱私保證條 (消除使用者對「上傳」的誤解) */}
+      <div className="p-3.5 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 text-xs flex items-start gap-3 text-cyan-100 shadow-sm">
+        <ShieldCheck className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <div className="font-bold text-white flex items-center gap-1.5">
+            <span>🔒 純本地離線讀取保證（絕不上傳任何檔案至伺服器）</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+              隱私安全
+            </span>
+          </div>
+          <p className="text-slate-300 text-[11px] leading-relaxed">
+            本系統試卷完全存放於您目前電腦的瀏覽器中，完全無伺服器傳輸。
+            若點擊資料夾時 Chrome 跳出「是否上傳」提問，此為瀏覽器讀取本地資料夾的原生制式警告字眼，請安心點選；
+            亦可直接使用「多選圖片」或「直接拖曳圖檔放入」，即可 100% 免除瀏覽器提示！
+          </p>
+        </div>
+      </div>
       
-      {/* 頂部標題與按鈕群組 (單張上傳 + 📁 指定資料夾批次匯入) */}
+      {/* 頂部標題與按鈕群組 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
@@ -342,7 +443,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5">
-          {/* 按鈕 1: 隱藏的資料夾上傳 input */}
+          {/* 按鈕 1: 隱藏的資料夾上傳 input (Fallback) */}
           <input
             type="file"
             ref={folderInputRef}
@@ -364,27 +465,29 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             className="hidden"
           />
 
-          {/* 📂 直接讀取本機資料夾按鈕 (點擊直選，即讀即用) */}
+          {/* 📂 直接讀取本機資料夾按鈕 (優先調用現代 File System Access API) */}
           <button
-            onClick={() => folderInputRef.current?.click()}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/40 text-xs font-bold shadow-md shadow-cyan-900/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            onClick={handleOpenNativeDirectory}
+            disabled={isBatchProcessing}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/40 text-xs font-bold shadow-md shadow-cyan-900/30 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
             title="直接點選電腦或隨身碟裡的考卷資料夾，系統立刻全部讀入列出"
           >
             <FolderUp className="w-4 h-4 text-cyan-200" />
-            <span>📁 讀取本機考卷資料夾</span>
+            <span>{isBatchProcessing ? '正在讀取考卷中...' : '📁 讀取本機考卷資料夾'}</span>
           </button>
 
-          {/* 📂 多選圖片按鈕 */}
+          {/* 📂 多選圖片按鈕 (絕對不彈資料夾上傳提示) */}
           <button
             onClick={() => multiFileInputRef.current?.click()}
-            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98]"
-            title="多選圖片檔案直接讀取"
+            disabled={isBatchProcessing}
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98] disabled:opacity-50"
+            title="按住 Ctrl 多選多張試卷圖檔直接讀入"
           >
             <Files className="w-4 h-4 text-cyan-400" />
-            <span>多選圖片直接讀入</span>
+            <span>🖼️ 多選圖片讀入</span>
           </button>
 
-          {/* ＋ 單張上傳考卷按鈕 */}
+          {/* ＋ 單張建立考卷按鈕 */}
           <button
             onClick={() => setIsAddModalOpen(true)}
             className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition-all active:scale-[0.98]"
